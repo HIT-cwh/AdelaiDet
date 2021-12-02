@@ -1,9 +1,11 @@
 MODEL:
-  META_ARCHITECTURE: "CondInst"
+  WEIGHTS: "./ckpt/init_stu_res50.pth"
+  META_ARCHITECTURE: "CondInst_distill"
   MASK_ON: True
   BACKBONE:
     NAME: "build_fcos_resnet_fpn_backbone"
   RESNETS:
+    DEPTH: 50
     OUT_FEATURES: ["res3", "res4", "res5"]
   FPN:
     IN_FEATURES: ["res3", "res4", "res5"]
@@ -18,6 +20,7 @@ DATASETS:
   TRAIN: ("coco_2017_train",)
   TEST: ("coco_2017_val",)
 SOLVER:
+  find_unused_parameters: True
   IMS_PER_BATCH: 16
   BASE_LR: 0.01
   STEPS: (60000, 80000)
@@ -30,3 +33,4 @@ INPUT:
             'datasets/coco/': 'openmmlab:s3://openmmlab/datasets/detection/coco/',
             '.datasets/coco/': 'openmmlab:s3://openmmlab/datasets/detection/coco/'
         }))]" ]
+OUTPUT_DIR: "output/condinst_MS_R_50_1x_distill"

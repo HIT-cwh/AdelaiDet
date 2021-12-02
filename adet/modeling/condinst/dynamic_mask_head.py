@@ -132,6 +132,8 @@ class DynamicMaskHead(nn.Module):
 
         self.register_buffer("_iter", torch.zeros([1]))
 
+        self.identity = nn.Identity()
+
     def mask_heads_forward(self, features, weights, biases, num_insts):
         '''
         :param features
@@ -218,6 +220,9 @@ class DynamicMaskHead(nn.Module):
                 mask_logits = self.mask_heads_forward_with_coords(
                     mask_feats, mask_feat_stride, pred_instances
                 )
+
+                mask_logits = self.identity(mask_logits)  # hook the mask_logits for distill
+
                 mask_scores = mask_logits.sigmoid()
 
                 if self.boxinst_enabled:
