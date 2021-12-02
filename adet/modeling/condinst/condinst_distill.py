@@ -27,7 +27,7 @@ __all__ = ["CondInst_distill"]
 logger = logging.getLogger(__name__)
 
 LOSS_DICT = dict()
-def register_parser(name, parser_dict, force=False):
+def loss_register(name, parser_dict, force=False):
 
     def _register(parser_func):
         if (name not in parser_dict) or force:
@@ -46,7 +46,7 @@ def build_loss(cfg):
     return LOSS_DICT[type](**cfg)
 
 
-@register_parser('cwd', LOSS_DICT)
+@loss_register('cwd', LOSS_DICT)
 class ChannelWiseDivergence(nn.Module):
     def __init__(
         self,
@@ -76,7 +76,7 @@ class ChannelWiseDivergence(nn.Module):
         return loss
 
 
-@register_parser('cwd_match', LOSS_DICT)
+@loss_register('cwd_match', LOSS_DICT)
 class ChannelWiseDivergence_match(nn.Module):
 
     def __init__(self, tau=1.0, loss_weight=1.0):
