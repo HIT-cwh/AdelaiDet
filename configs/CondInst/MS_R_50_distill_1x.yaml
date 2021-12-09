@@ -1,5 +1,5 @@
 MODEL:
-  WEIGHTS: "./ckpt/init_stu_res50.pth"
+  WEIGHTS: "./ckpt/init_stu_res50_tea_res101.pth"
   META_ARCHITECTURE: "CondInst_distill"
   MASK_ON: True
   BACKBONE:

@@ -4,6 +4,8 @@ from torch import nn
 
 from adet.utils.comm import compute_locations, aligned_bilinear
 
+from detectron2.utils.comm import get_rank
+
 
 def compute_project_term(mask_scores, gt_bitmasks):
     mask_losses_y = dice_coefficient(
@@ -132,7 +134,10 @@ class DynamicMaskHead(nn.Module):
 
         self.register_buffer("_iter", torch.zeros([1]))
 
-        self.identity = nn.Identity()
+        self.identity_mask = nn.Identity()
+        self.identity_gt_mask = nn.Identity()
+        self.identity_im_inds = nn.Identity()
+        self.identity_gt_inds = nn.Identity()
 
     def mask_heads_forward(self, features, weights, biases, num_insts):
         '''
@@ -164,7 +169,12 @@ class DynamicMaskHead(nn.Module):
         n_inst = len(instances)
 
         im_inds = instances.im_inds
+        im_inds = self.identity_im_inds(im_inds)
         mask_head_params = instances.mask_head_params
+
+        # if get_rank() == 0:
+        #     print('n_inst: ', n_inst)
+        #     print('im_inds: ', im_inds)
 
         N, _, H, W = mask_feats.size()
 
@@ -206,6 +216,11 @@ class DynamicMaskHead(nn.Module):
             gt_inds = pred_instances.gt_inds
             gt_bitmasks = torch.cat([per_im.gt_bitmasks for per_im in gt_instances])
             gt_bitmasks = gt_bitmasks[gt_inds].unsqueeze(dim=1).to(dtype=mask_feats.dtype)
+            gt_bitmasks = self.identity_gt_mask(gt_bitmasks)
+            gt_inds = self.identity_gt_inds(gt_inds)
+            # if get_rank() == 0:
+            #     print(gt_bitmasks.shape)
+            #     print(gt_inds)
 
             losses = {}
 
@@ -221,7 +236,7 @@ class DynamicMaskHead(nn.Module):
                     mask_feats, mask_feat_stride, pred_instances
                 )
 
-                mask_logits = self.identity(mask_logits)  # hook the mask_logits for distill
+                mask_logits = self.identity_mask(mask_logits)  # hook the mask_logits for distill
 
                 mask_scores = mask_logits.sigmoid()
 

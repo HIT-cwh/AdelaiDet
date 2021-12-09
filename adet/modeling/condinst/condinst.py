@@ -191,6 +191,7 @@ class CondInst(nn.Module):
         assert (self.max_proposals == -1) or (self.topk_proposals_per_im == -1), \
             "MAX_PROPOSALS and TOPK_PROPOSALS_PER_IM cannot be used at the same time."
         if self.max_proposals != -1:
+            # print('len(stu_pred_instances) = ', len(pred_instances))
             if self.max_proposals < len(pred_instances):
                 inds = torch.randperm(len(pred_instances), device=mask_feats.device).long()
                 logger.info("clipping proposals from {} to {}".format(
@@ -222,6 +223,7 @@ class CondInst(nn.Module):
                     kept_instances.append(instances_per_gt)
 
             pred_instances = Instances.cat(kept_instances)
+            # print('len(tea_pred_instances) = ', len(pred_instances))
 
         pred_instances.mask_head_params = pred_instances.top_feats
 
