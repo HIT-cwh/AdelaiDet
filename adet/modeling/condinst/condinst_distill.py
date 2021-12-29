@@ -50,34 +50,64 @@ def build_loss(cfg):
     return LOSS_DICT[type](**cfg)
 
 
-@loss_register('cwd', LOSS_DICT)
-class ChannelWiseDivergence(nn.Module):
+def dice_coefficient(x, target):
+    eps = 1e-5
+    n_inst = x.size(0)
+    x = x.reshape(n_inst, -1)
+    target = target.reshape(n_inst, -1)
+    intersection = (x * target).sum(dim=1)
+    union = (x ** 2.0).sum(dim=1) + (target ** 2.0).sum(dim=1) + eps
+    loss = 1. - (2 * intersection / union)
+    return loss
+
+
+def nms(loss, gt_inds):
+    assert len(loss.shape) == 1
+    loss_inds = torch.arange(loss.size(0), dtype=torch.int, device=loss.device)
+    inds_unique = gt_inds.unique()
+    nms_loss_inds = []
+    for ind in inds_unique:
+        loss_per_ins = loss[gt_inds==ind]
+        loss_inds_per_ins = loss_inds[gt_inds==ind]
+        nms_loss_inds.append(loss_inds_per_ins[loss_per_ins.argmin()])
+    return torch.tensor(nms_loss_inds, dtype=torch.long, device=loss.device), inds_unique
+
+
+@loss_register('dice', LOSS_DICT)
+class DiceCoefficient(nn.Module):
     def __init__(
         self,
         tau=1.0,
         loss_weight=1.0,
     ):
-        super(ChannelWiseDivergence, self).__init__()
+        super(DiceCoefficient, self).__init__()
         self.tau = tau
         self.loss_weight = loss_weight
+        self.visualization = True
 
-    def forward(self, preds_T, preds_S):
-        """Forward function."""
-        assert preds_S.shape[-2:] == preds_T.shape[-2:]
-        N, C, W, H = preds_S.shape
+    def match(self, nms_preds_T, preds_S, nms_gt_inds_T, gt_inds_S, gt_S):
+        t_inds = []
+        s_inds = []
+        for gt_ind in gt_inds_S:
+            arg = torch.where(nms_gt_inds_T==gt_ind)[0]
+            s_inds.append(arg.size(0) == 1)
+            if arg.size(0):
+                t_inds.append(arg)
+        t_inds = torch.tensor(t_inds, dtype=torch.long, device=nms_preds_T.device)
+        s_inds = torch.tensor(s_inds, dtype=torch.bool, device=preds_S.device)
+        return nms_preds_T[t_inds], preds_S[s_inds], gt_S[s_inds]
 
-        softmax_pred_T = F.softmax(preds_T.reshape(-1, W * H) / self.tau, dim=1)
-
-        logsoftmax = torch.nn.LogSoftmax(dim=1)
-        loss = torch.sum(softmax_pred_T *
-                         logsoftmax(preds_T.reshape(-1, W * H) / self.tau) -
-                         softmax_pred_T *
-                         logsoftmax(preds_S.reshape(-1, W * H) / self.tau)) * (
-                             self.tau**2)
-
-        loss = self.loss_weight * loss / (C * N)
-
+    def forward(self, preds_T, preds_S, im_ind, gt_T, gt_S, iter, gt_inds_T, gt_inds_S):
+        iou_loss = dice_coefficient(preds_T, gt_T)
+        nms_preds_T_inds, nms_gt_inds_T = nms(iou_loss, gt_inds_T)
+        nms_preds_T = preds_T[nms_preds_T_inds]
+        preds_T, preds_S, gt_S = self.match(nms_preds_T, preds_S, nms_gt_inds_T,
+                                            gt_inds_S, gt_S)
+        if self.visualization and iter % 1000 == 0 and get_rank() == 0:
+            visualization(im_ind, f'dice_visualization_iter{iter}', preds_T, preds_S, gt_S)
+        loss = self.loss_weight * dice_coefficient(preds_S, preds_T).sum()
         return loss
+
 
 def visualization(im_ind, root, *preds):
     assert len(preds) > 0
@@ -93,17 +123,6 @@ def visualization(im_ind, root, *preds):
         cv2.imwrite(osp.join(root, f'img_{im_ind}_mask_{i}.png'), img)
 
 
-# def visualization(preds_T, preds_S, im_ind, root='visualization2'):
-#     assert preds_T.shape == preds_S.shape
-#     preds_T, preds_S = preds_T.sigmoid() * 255, preds_S.sigmoid() * 255
-#     preds_T, preds_S = preds_T.int(), preds_S.int()
-#     output = torch.cat([preds_T, preds_S], dim=-1).cpu().numpy()
-#     # print(preds_T.shape, preds_S.shape, output.shape)
-#     mmcv.mkdir_or_exist(root)
-#     for i, img in enumerate(output):
-#         cv2.imwrite(osp.join(root, f'img_{im_ind}_mask_{i}.png'), img)
-
-
 def visualization_single(preds_S, im_ind, gt_ind, root='gt2'):
     preds_S = preds_S[0]
     preds_S = preds_S.sigmoid() * 255
@@ -111,77 +130,6 @@ def visualization_single(preds_S, im_ind, gt_ind, root='gt2'):
     mmcv.mkdir_or_exist(root)
     # for i, img in enumerate(preds_S):
     cv2.imwrite(osp.join(root, f'img_{im_ind}_gt_{gt_ind}.png'), preds_S)
-
-
-@loss_register('cwd_match', LOSS_DICT)
-class ChannelWiseDivergence_match(nn.Module):
-
-    def __init__(self, tau=1.0, loss_weight=1.0):
-        super(ChannelWiseDivergence_match, self).__init__()
-        self.tau = tau
-        self.loss_weight = loss_weight
-        # self.visualization = False
-
-    def cal_loss(self, channel_T, channel_S):
-        N, W, H = channel_S.shape
-        softmax_pred_T = F.softmax(channel_T.reshape(-1, W * H) / self.tau, dim=1)
-
-        logsoftmax = torch.nn.LogSoftmax(dim=1)
-        loss = torch.sum(softmax_pred_T *
-                         logsoftmax(channel_T.reshape(-1, W * H) / self.tau) -
-                         softmax_pred_T *
-                         logsoftmax(channel_S.reshape(-1, W * H) / self.tau)) * (
-                             self.tau**2)
-
-        # loss = loss / N
-        return loss
-
-    def compute_kl_matrix(self, logits_p, logits_q):
-        N_p, W, H = logits_p.shape
-        N_q = logits_q.size(0)
-        logits_p, logits_q = logits_p.detach(), logits_q.detach()
-
-        prob_p = F.softmax(logits_p.reshape(N_p, W * H) / self.tau, dim=-1)
-
-        log_prob_p = F.log_softmax(
-            logits_p.reshape(N_p, W * H) / self.tau, dim=-1)
-        log_prob_q = F.log_softmax(
-            logits_q.reshape(N_q, W * H) / self.tau, dim=-1)
-
-        cross_entropy_matrix = -torch.einsum('ik, jk -> ij', [prob_p, log_prob_q])
-        # cross_entropy_matrix = -torch.bmm(log_prob_q, prob_p.transpose(1, 2))
-        entropy_p = -(prob_p * log_prob_p).sum(-1, keepdim=True)
-
-        kl_matrix = cross_entropy_matrix - entropy_p
-
-        return kl_matrix
-
-    def forward(self, preds_T, preds_S, im_ind, gt, iter):
-        """Forward function."""
-        assert preds_S.shape[-2:] == preds_T.shape[-2:]
-
-        t_s_kl_matrix = self.compute_kl_matrix(preds_T, preds_S)
-        t_gt_kl_matrix = self.compute_kl_matrix(preds_T, gt)
-        try:
-            t_s_t_ind, t_s_s_ind = linear_sum_assignment(t_s_kl_matrix.cpu())
-            t_gt_t_ind, t_gt_gt_ind = linear_sum_assignment(t_gt_kl_matrix.cpu())
-        except:
-            if get_rank() == 0:
-                print(preds_S)
-            input()
-        match = t_s_s_ind == t_gt_gt_ind
-        # if get_rank() == 0:
-        #     print(match.sum())
-        if get_rank() == 0 and iter % 100 == 0 and match.sum() > 0:
-            visualization(im_ind, f'visualization_iter{iter}',
-                          preds_T[t_s_t_ind[match]], preds_S[t_s_s_ind[match]], gt[t_s_s_ind[match]])
-
-        if match.sum() > 0:
-            loss = self.loss_weight * self.cal_loss(preds_T[t_s_t_ind[match]],
-                                                    preds_S[t_s_s_ind[match]])
-        else:
-            loss = torch.zeros((), device=preds_S.device)
-        return loss, match.sum()
 
 
 @META_ARCH_REGISTRY.register()
@@ -205,16 +153,6 @@ class CondInst_distill(nn.Module):
         tea_cfg.freeze()
         self.teacher = CondInst(tea_cfg)
 
-        #############################
-        # Only for debug
-        # stu_pretrain_path = "./ckpt/CondInst_MS_R_50_1x.pth"
-        # load_checkpoint(self.student, stu_pretrain_path, map_location=cfg.MODEL.DEVICE)
-        # print('Successfully load student checkpoint.')
-        #############################
-
-        # tea_pretrain_path = "./ckpt/CondInst_MS_R_101_3x.pth"
-        # load_checkpoint(self.teacher, tea_pretrain_path, map_location=cfg.MODEL.DEVICE)
-        # print('Successfully load teacher checkpoint.')
         if self.teacher_trainable:
             self.teacher.train()
         else:
@@ -225,11 +163,17 @@ class CondInst_distill(nn.Module):
                 student_module='mask_head.identity_mask',
                 teacher_module='mask_head.identity_mask',
                 losses=[
+                    # dict(
+                    #     type='cwd',
+                    #     name='loss_cwd',
+                    #     tau=1,
+                    #     loss_weight=1,
+                    # ),
                     dict(
-                        type='cwd_match',
-                        name='loss_cwd',
+                        type='dice',
+                        name='mask_loss_dis',
                         tau=1,
-                        loss_weight=1,
+                        loss_weight=2,
                     )
                 ])
         ]
@@ -316,47 +260,23 @@ class CondInst_distill(nn.Module):
                 self.student_outputs['mask_head.identity_gt_inds'])
 
     def forward(self, batched_inputs):
+        if not self.training:
+            return self.student(batched_inputs)
         self.exec_teacher_forward(batched_inputs)
         losses = self.exec_student_forward(batched_inputs)
         self._iter += 1
-        # if self._iter < 60:
-        #     return losses
-
-        # if get_rank() == 0:
-        #     print('tea')
-        #     for key, val in self.teacher_outputs.items():
-        #         print(val.shape)
-        #         print(val)
-        #     print('stu')
-        #     for key, val in self.student_outputs.items():
-        #         print(val.shape)
-        #         print(val)
-        #     print('*'*40)
-        # if self._iter % 20 == 0:
-        #     print(self.teacher_outputs)
-        #     print(self.student_outputs)
         tea_im_inds, stu_im_inds = self.get_im_inds()
         tea_mask_gt, stu_mask_gt = self.get_mask_gt()
         tea_gt_inds, stu_gt_inds = self.get_gt_inds()
+        # if get_rank() == 0:
+        #     print(tea_gt_inds, stu_gt_inds)
 
         assert all(tea_im_inds.unique() == stu_im_inds.unique())
         im_inds = tea_im_inds.unique()
+        # print('im_inds: ', im_inds)
 
         tea_mask_gt = tea_mask_gt.squeeze(1)
         stu_mask_gt = stu_mask_gt.squeeze(1)
-
-        # for im_ind in im_inds:
-        #     stu_mask_gt_per_im = stu_mask_gt[stu_im_inds == im_ind]
-        #     stu_gt_inds_per_im = stu_gt_inds[stu_im_inds == im_ind]
-        #     if get_rank() == 0:
-        #         print(stu_mask_gt_per_im.shape)
-        #         print(stu_gt_inds_per_im)
-        #     gt_inds_per_im = stu_gt_inds_per_im.unique()
-        #     for gt_ind in gt_inds_per_im:
-        #         if get_rank() == 0:
-        #             print(stu_mask_gt_per_im[stu_gt_inds_per_im == gt_ind].shape)
-        #             visualization_single(stu_mask_gt_per_im[stu_gt_inds_per_im == gt_ind],
-        #                                  im_ind, gt_ind, root='gt2')
 
         for i, component in enumerate(self.components):
             student_module_name = component['student_module']
@@ -378,23 +298,25 @@ class CondInst_distill(nn.Module):
                 loss_name = loss['name']
                 loss_func = self.distill_losses[loss_name]
                 loss = 0.
-                match_num = 0
+                # match_num = 0
                 for im_ind in im_inds:
                     stu_mask_gt_per_im = stu_mask_gt[stu_im_inds == im_ind]
-                    loss_per_im, match_per_im = loss_func(teacher_output[tea_im_inds==im_ind],
+                    tea_mask_gt_per_im = tea_mask_gt[tea_im_inds == im_ind]
+                    loss_per_im= loss_func(teacher_output[tea_im_inds==im_ind],
                                                           student_output[stu_im_inds==im_ind],
-                                                          im_ind, stu_mask_gt_per_im, self._iter)
+                                                          im_ind,
+                                                          tea_mask_gt_per_im,
+                                                          stu_mask_gt_per_im,
+                                                          self._iter,
+                                                          tea_gt_inds[tea_im_inds==im_ind],
+                                                          stu_gt_inds[stu_im_inds==im_ind])
                     loss += loss_per_im
-                    match_num += match_per_im
-                    # loss += loss_func(teacher_output[tea_im_inds==im_ind],
-                    #                   student_output[stu_im_inds==im_ind], im_ind, stu_mask_gt_per_im, self._iter)
-                    # if get_rank() == 0:
-                    #     print(loss)
-
-                # warm_up = 1 if self._iter >= 500 else 0
-                if match_num == 0:
-                    assert loss == 0
-                losses[loss_name] = loss / match_num if match_num else torch.zeros((), device=student_output.device)
+                    # match_num += match_per_im
+                losses[loss_name] = loss / stu_mask_gt.size(0)
+                # assert False
+                # if match_num == 0:
+                #     assert loss == 0
+                # losses[loss_name] = loss / match_num if match_num else torch.zeros((), device=student_output.device)
         # input()
 
         return losses

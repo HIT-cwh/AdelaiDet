@@ -1,7 +1,7 @@
 MODEL:
-#  WEIGHTS: "./ckpt/init_stu_res50_tea_res101.pth"
-  WEIGHTS: "./training_dir/CondInst_MS_R_50_distill_1x_dice_lossweight_2/model_0084999.pth"
-  META_ARCHITECTURE: "CondInst_distill"
+  WEIGHTS: "./ckpt/init_stu_res50_tea_res101.pth"
+#  WEIGHTS: "./training_dir/CondInst_MS_R_50_1x_lossweight_1/model_0024999.pth"
+  META_ARCHITECTURE: "CondInst_cwd"
   MASK_ON: True
   BACKBONE:
     NAME: "build_fcos_resnet_fpn_backbone"
