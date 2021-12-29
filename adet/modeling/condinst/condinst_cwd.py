@@ -460,7 +460,7 @@ class CondInst_cwd(nn.Module):
                     dict(
                         type=cfg.MODEL.CONDINST.DISTILL_LOSS,
                         name='loss_cwd',
-                        tau=1,
+                        tau=cfg.MODEL.CONDINST.DISTILL_LOSS_TAU,
                         loss_weight=cfg.MODEL.CONDINST.DISTILL_LOSS_WEIGHT,
                     ),
                 ])
