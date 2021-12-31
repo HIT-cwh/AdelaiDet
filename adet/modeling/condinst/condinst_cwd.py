@@ -5,6 +5,7 @@ import copy
 from scipy.optimize import linear_sum_assignment
 import cv2
 import os.path as osp
+import numpy as np
 
 import torch
 from torch import nn
@@ -484,6 +485,8 @@ class CondInst_cwd(nn.Module):
         self.teacher_outputs = {}
         self.prepare_from_student()
 
+        self.last_tea, self.last_stu = None, None
+
     def prepare_from_student(self):
         self.student_module2name = {}
         for name, module in self.student.named_modules():
@@ -601,6 +604,13 @@ class CondInst_cwd(nn.Module):
                     loss += loss_per_im
                     # match_num += match_per_im
                 losses[loss_name] = loss / stu_mask_gt.size(0)
+                # if not np.isfinite(losses[loss_name].detach().cpu().numpy()):
+                #     print('teacher_output')
+                #     print(self.last_tea[0].max())
+                #     print('student_output')
+                #     print(self.last_stu[0].max())
+                # self.last_tea, self.last_stu = teacher_output, student_output
+                # print(self.last_stu[0].max())
                 # assert False
                 # if match_num == 0:
                 #     assert loss == 0
