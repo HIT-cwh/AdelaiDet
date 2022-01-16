@@ -61,6 +61,16 @@ def dice_coefficient(x, target):
     return loss
 
 
+def KLDivergence(x, target):
+    N, _, W, H = x.shape
+    target = target.reshape(-1, W * H)
+    x = x.reshape(-1, W * H)
+    softmax_pred_T = F.softmax(target, dim=1)
+    logsoftmax = torch.nn.LogSoftmax(dim=1)
+    loss = torch.sum(softmax_pred_T * logsoftmax(target) - softmax_pred_T * logsoftmax(x))
+    return loss
+
+
 def parse_dynamic_params(params, channels, weight_nums, bias_nums):
     assert params.dim() == 2
     assert len(weight_nums) == len(bias_nums)
@@ -264,6 +274,7 @@ class DynamicMaskHead(nn.Module):
                     })
                 else:
                     # fully-supervised CondInst losses
+                    # mask_losses = KLDivergence(mask_logits, gt_bitmasks)
                     mask_losses = dice_coefficient(mask_scores, gt_bitmasks)
                     loss_mask = mask_losses.mean()
                     losses["loss_mask"] = loss_mask

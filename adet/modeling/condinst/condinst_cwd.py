@@ -585,14 +585,27 @@ class CondInst_cwd(nn.Module):
             assert teacher_output.size(1) == 1
             teacher_output = teacher_output.squeeze(1)
 
+            # add bn1d
+            assert student_output.shape[-2:] == teacher_output.shape[-2:]
+            _, H, W = student_output.shape
+            student_output = F.batch_norm(student_output.reshape(-1, H * W), None, None, training=True).reshape(-1, H, W)
+            teacher_output = F.batch_norm(teacher_output.reshape(-1, H * W), None, None, training=True).reshape(-1, H, W)
+
             for loss in component['losses']:
                 loss_name = loss['name']
                 loss_func = self.distill_losses[loss_name]
                 loss = 0.
                 # match_num = 0
                 for im_ind in im_inds:
-                    stu_mask_gt_per_im = stu_mask_gt[stu_im_inds == im_ind]
-                    tea_mask_gt_per_im = tea_mask_gt[tea_im_inds == im_ind]
+                    try:
+                        stu_mask_gt_per_im = stu_mask_gt[stu_im_inds == im_ind]
+                        tea_mask_gt_per_im = tea_mask_gt[tea_im_inds == im_ind]
+                    except:
+                        print(stu_mask_gt.shape)
+                        print(stu_im_inds)
+                        print(im_ind)
+                        print(tea_mask_gt.shape)
+                        assert False
                     loss_per_im= loss_func(teacher_output[tea_im_inds==im_ind],
                                                           student_output[stu_im_inds==im_ind],
                                                           im_ind,
@@ -615,6 +628,6 @@ class CondInst_cwd(nn.Module):
                 # if match_num == 0:
                 #     assert loss == 0
                 # losses[loss_name] = loss / match_num if match_num else torch.zeros((), device=student_output.device)
-        # input()
+        # assert False
 
         return losses

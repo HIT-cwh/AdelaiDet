@@ -81,8 +81,8 @@ def weighted_sum_teacher(preds_T, loss, gt_inds):
     for ind in inds_unique:
         preds_T_per_ins = preds_T[gt_inds == ind]
         loss_per_ins = loss[gt_inds == ind]
-        loss_per_ins = nn.Softmax(dim=0)(1/loss_per_ins)
-        preds.append((preds_T_per_ins * loss_per_ins.reshape(-1, 1, 1)).sum(dim=0, keepdim=True))
+        weight_per_ins = nn.Softmax(dim=0)(1 / loss_per_ins)
+        preds.append((preds_T_per_ins * weight_per_ins.reshape(-1, 1, 1)).sum(dim=0, keepdim=True))
     preds = torch.cat(preds, dim=0).to(preds_T.device)
     return preds, inds_unique
 
@@ -239,7 +239,8 @@ class ChannelWiseDivergence_all_insts(ChannelWiseDivergence):
             tau = gt_S_all_insts.sum() / gt_S.sum() * self.tau if self.use_adaptive_tau else self.tau
             # tau = gt_S_all_insts.sum() / gt_S.sum() * self.tau
             # if get_rank() == 0:
-            #     print(tau)
+            #     print(preds_T.shape)
+            # assert False
             pred_T, pred_S = pred_T[gt_S_all_insts], pred_S[gt_S_all_insts]
             assert len(pred_T.shape) == 1 and len(pred_S.shape) == 1
             softmax_pred_T = F.softmax(pred_T / tau)
@@ -256,7 +257,7 @@ class ChannelWiseDivergence_all_insts(ChannelWiseDivergence):
         t_inds, s_inds = self.match(nms_preds_T, preds_S, nms_gt_inds_T, gt_inds_S)
         preds_T, preds_S, gt_S = nms_preds_T[t_inds], preds_S[s_inds], gt_S[s_inds]
         if self.visualization and iter % self.frequency == 0 and get_rank() == 0:
-            visualization(im_ind, f'cwd_all_insts_{iter}', preds_T, preds_S, gt_S)
+            visualization(im_ind, f'cwd_all_insts_w5_{iter}', preds_T, preds_S, gt_S)
         loss = self.loss_weight * self.cal_loss(preds_T, preds_S, gt_S)
         return loss
 
